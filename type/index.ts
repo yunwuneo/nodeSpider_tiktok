@@ -22,6 +22,7 @@ interface TiktokUserLikeVideoAddr {
 }
 
 interface TiktokUserLikeImage {
+  video: TiktokUserLikeVideoAddr;
   url_list: string[];
   download_url_list: string[];
 }
@@ -31,6 +32,7 @@ export interface SpiderQueue {
   desc: string;
   url: string | string[];
   info: any;
+  isImage: boolean;
 }
 
 export interface DownloadProgressMessage {

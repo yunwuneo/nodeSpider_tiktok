@@ -34,10 +34,10 @@ export const getUserSecId = async (userUrl: string) => {
     userSecId = response.url;
   }
 
-  userSecId = getTiktokSecId(userSecId);
+  const secId = getTiktokSecId(userSecId);
 
-  if (!userSecId) throw new Error("Sec_Id 获取失败");
-  return userSecId;
+  if (!secId) throw new Error("Sec_Id 获取失败");
+  return secId;
 };
 
 /**
@@ -56,6 +56,10 @@ const getTTWid = async () => {
   };
   const result = await request(TTWideUrl, { method: "POST", body: JSON.stringify(postBody) });
   const ttwid = result.headers.get("set-cookie");
+
+  if (!ttwid) {
+    throw new Error("Failed to get ttwid from response headers");
+  }
 
   return ttwid.split(";").map((item) => item.trim())[0];
 };
@@ -121,11 +125,15 @@ export const reptyErrorQueue = async (repty: boolean, downloadType: string) => {
     const errorQueue = await readJSON(queueJSONPath);
     for await (const queue of errorQueue) {
       const { play_addr: { url_list = [], uri = "" } = {}, bit_rate = [{}] } = queue.video || {};
-      const downlinkList = [...(bit_rate[0]?.play_addr?.url_list || []), ...url_list, transformDownloadUrl(uri)];
+      const downlinkList = [
+        ...(Array.isArray(bit_rate) && bit_rate[0]?.play_addr?.url_list ? bit_rate[0].play_addr.url_list : []),
+        ...url_list,
+        transformDownloadUrl(uri)
+      ];
 
       for (let index = 0; index < downlinkList.length; index++) {
         console.log(`正在尝试 ${queue.aweme_id} ===> 第${index + 1}次`);
-        const downItem = { id: queue.aweme_id, desc: queue.desc, url: downlinkList[index], info: {} };
+        const downItem = { id: queue.aweme_id, desc: queue.desc, url: downlinkList[index], info: {},isImage:false };
 
         try {
           await downloadVideoSingle(downItem, downloadType);

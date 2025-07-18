@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { odin_tt, passport_csrf_token, sessionid } from "../config/config.json";
 import { getXB } from "./X-Bogus";
 import { HDDownloadUrl } from "./config";
+import { platform } from "os";
 
 /**
  * 从 URL 中拆出 Sec_id
@@ -60,13 +61,14 @@ export const getCookies = async (getTtwidFn) => {
  */
 export const transformParams = (sec_user_id: string, max_cursor: number) => {
   const params = {
-    sec_user_id,
-    count: 20,
-    max_cursor,
     aid: 6383,
-    cookie_enabled: true,
     platform: "PC",
+    sec_user_id,
+    max_cursor,
+    count: 20,
+    cookie_enabled: true,
     downlink: 10,
+    publish_video_strategy_type: 2,
   };
   params["X-Bogus"] = getXB(stringify(params));
 

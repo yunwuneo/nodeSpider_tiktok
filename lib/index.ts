@@ -20,7 +20,7 @@ const loadQueue = async (user: string, type: string, limit: number) => {
   let _max_cursor = 0;
   let _pageCount = 0;
   let _max_retry = 1;
-  const list_max_retry_limit = 15;
+  const list_max_retry_limit = 5;
 
   // 循环分页
   while (_has_more) {
@@ -42,8 +42,8 @@ const loadQueue = async (user: string, type: string, limit: number) => {
         continue;
       }
 
-      console.log("获取内容结束 ===> 列表为空");
-      break;
+      console.log("获取该页内容结束 ===> 列表为空，继续下一页");
+      // break;
     }
 
     // 外部变量控制循环
@@ -51,18 +51,63 @@ const loadQueue = async (user: string, type: string, limit: number) => {
     _has_more = !!has_more;
     _max_cursor = max_cursor;
 
-    for (let item of list) {
-      const spiderInfo = {
-        id: item.aweme_id,
-        desc: item.desc,
-        url:
-          item.aweme_type === 68
-            ? item.images.map((item) => item.url_list[0]) ?? item.images.map((item) => item.download_url_list[0])
-            : item.video?.bit_rate?.[0]?.play_addr?.url_list?.[0] ?? item.video?.play_addr?.url_list?.[0],
-        info: item,
-      };
-      spiderQueue.push(spiderInfo);
+    // for (let item of list) {
+    //   const spiderInfo = {
+    //     id: item.aweme_id,
+    //     desc: item.desc,
+    //     url:
+    //       item.aweme_type === 68
+    //         ? item.images.map((item) => item.url_list[0]) ?? item.images.map((item) => item.download_url_list[0])
+    //         : item.video?.bit_rate?.[0]?.play_addr?.url_list?.[0] ?? item.video?.play_addr?.url_list?.[0],
+    //     info: item,
+    //   };
+    //   spiderQueue.push(spiderInfo);
+    // }
+
+    if (!Array.isArray(list)) {
+      console.log("内容获取完成 无效列表");
+      continue;
     }
+
+    for (let item of list) {
+      if (item.aweme_type === 68) {
+        const spiderInfo = {
+          id: item.aweme_id,
+          desc: item.desc,
+          url: item.images.map((item) => item.url_list[0]) ?? item.images.map((item) => item.download_url_list[0]),
+          info: item,
+          isImage: true
+        };
+        spiderQueue.push(spiderInfo);
+
+        let urls = [];
+        item.images.forEach((e) => {
+          if (e.video && e.video.play_addr && e.video.play_addr.url_list && e.video.play_addr.url_list[0]) {
+            urls.push(e.video.play_addr.url_list[0]);
+          }
+        })
+        if (urls.length > 0) {
+          const spiderInfo = {
+            id: item.aweme_id,
+            desc: item.desc,
+            url: urls,
+            info: item,
+            isImage: false
+          };
+          spiderQueue.push(spiderInfo);
+        }
+      } else {
+        const spiderInfo = {
+          id: item.aweme_id,
+          desc: item.desc,
+          url: item.video?.bit_rate?.[0]?.play_addr?.url_list?.[0] ?? item.video?.play_addr?.url_list?.[0],
+          info: item,
+          isImage: false
+        };
+        spiderQueue.push(spiderInfo);
+      }
+    }
+
   }
   console.log("内容获取完成 有效列表项", spiderQueue.length, "项");
 
@@ -77,7 +122,7 @@ const loadQueue = async (user: string, type: string, limit: number) => {
     const spiderQueue = await loadQueue(user, type, limit);
     const hasErr = await downloadVideoQueue(spiderQueue, downloadDir);
 
-    await reptyErrorQueue(hasErr, downloadDir);
+    await reptyErrorQueue(hasErr ?? false, downloadDir);
     index++;
   }
 })();

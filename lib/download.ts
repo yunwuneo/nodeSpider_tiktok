@@ -1,4 +1,3 @@
-import filenamify from "filenamify";
 import { ensureDir } from "fs-extra";
 import { resolve } from "node:path";
 import download from "nodejs-file-downloader";
@@ -8,6 +7,7 @@ import { DownloadCoreMessage, SpiderQueue } from "../type";
 import { errQueueToJson, getDateTimeString, getFileSize, logError } from "../utils";
 import { headerOption as headers } from "../utils/config";
 import cliProgress from "cli-progress";
+import filenamify from "filenamify";
 
 /**
  * 下载视频队列
@@ -54,6 +54,7 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
     );
 
     const results = await Promise.allSettled(promises);
+
     progressBar.stop();
     console.log("下载完成 任务结束 实际下载文件总数 ===>", downloadRecord, "/", videoQueue.length);
     return results.every((result) => result.status === "fulfilled" && result.value);
@@ -61,7 +62,9 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
     let hasErr = false;
     for await (const [index, item] of workerData.videoQueue.entries()) {
       try {
-        if (Array.isArray(item.url)) await downloadImageSingle(item, workerData.dir);
+        // if (Array.isArray(item.url)) await downloadImageSingle(item, workerData.dir);
+        // else await downloadVideoSingle(item, workerData.dir);
+        if (item.isImage) await downloadImageSingle(item, workerData.dir);
         else await downloadVideoSingle(item, workerData.dir);
       } catch (error) {
         hasErr = true;
@@ -114,13 +117,26 @@ const downloadCore = (url: string, directory: string, fileName: string, id: stri
  * @param dir 下载目录
  */
 export const downloadVideoSingle = async (item: SpiderQueue, dir: string) => {
-  const directory = resolve(process.cwd(), downloadDir, filenamify(dir));
-  const fileName = `${item.id}-${filenamify(item.desc)}.mp4`;
-  await ensureDir(directory).catch((error) => console.log("downloadVideoQueue: 下载目录创建失败"));
+  if (!Array.isArray(item.url)) {
+    const directory = resolve(process.cwd(), downloadDir, filenamify(dir));
+    const fileName = `${item.id}-${filenamify(item.desc)}.mp4`;
+    await ensureDir(directory).catch((error) => console.log("downloadVideoQueue: 下载目录创建失败"));
 
-  let downloadHelper = downloadCore(item.url as string, directory, fileName, item.id, true);
-  await downloadHelper.download();
-};
+    let downloadHelper = downloadCore(item.url as string, directory, fileName, item.id, true);
+    await downloadHelper.download();
+  } else {
+    const directory = resolve(process.cwd(), downloadDir, filenamify(dir), `${item.id}-${filenamify(item.desc)}`);
+    await ensureDir(directory).catch(() => console.log("downloadVideoQueue: 下载目录创建失败"));
+
+    for await (const [entriesIndex, urlItem] of (item.url as string[]).entries()) {
+      const extName = "mp4";
+      const fileName = `${item.id}_${entriesIndex}.${extName}`;
+
+      let downloadHelper = downloadCore(urlItem, directory, fileName, item.id, entriesIndex === item.url.length - 1);
+      await downloadHelper.download();
+    }
+  }
+}
 
 /**
  * 下载单个图片
@@ -142,3 +158,7 @@ export const downloadImageSingle = async (item: SpiderQueue, dir: string) => {
 };
 
 if (!isMainThread) downloadVideoQueue([], "");
+function fileURLToPath(url: string) {
+  throw new Error("Function not implemented.");
+}
+
