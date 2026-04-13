@@ -5,6 +5,7 @@
   "main": "lib/index.ts",
   "scripts": {
     "start": "tsx lib/index.ts",
+    "start:api": "tsx lib/server.ts",
     "helper": "tsx utils/fileHelper.ts"
   },
   "keywords": [

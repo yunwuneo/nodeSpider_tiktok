@@ -41,6 +41,14 @@
 "autoRetryDownload": true       // 是否自动重试下载失败的文件
 "downloadDir": "download/",     // 下载目录
 "workerNum": 4                  // 下载线程数
+"api": {
+  "apiKey": ""                  // API 鉴权 key，启动 API 服务前必须填写
+  "port": 3000                  // API 服务端口
+  "rateLimit": {
+    "windowMs": 60000           // 限流窗口，单位毫秒
+    "max": 30                   // 每个窗口允许的最大请求数
+  }
+}
 ```
 
 用户喜欢列表和发布作品只能下载公开状态的列表
@@ -58,6 +66,50 @@ pnpm install
 // 启动爬虫
 pnpm run start
 ```
+
+## API 调用
+
+API 服务会继续从本地 `config/config.json` 读取 `odin_tt`、`passport_csrf_token`、`sessionid` 等 Cookie 配置，这些字段不应、也不会从 API 请求体传入。
+
+先在 `config/config.json` 中配置 `api.apiKey`，然后启动 API 服务。临时测试时也可以用环境变量 `TIKTOK_API_KEY` 覆盖本地 API key，用 `PORT` 覆盖端口：
+
+```bash
+pnpm run start:api
+```
+
+健康检查：
+
+```bash
+curl http://localhost:3000/health
+```
+
+提交下载任务：
+
+```bash
+curl -X POST http://localhost:3000/api/download \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"user":"https://v.douyin.com/ABYrVmt/","type":"post","limit":10,"username":"demo"}'
+```
+
+请求成功后会返回任务 id 和状态查询地址。下载任务会进入本地内存队列串行执行：
+
+```json
+{
+  "id": "task-id",
+  "status": "queued",
+  "statusUrl": "/api/tasks/task-id"
+}
+```
+
+查询任务状态：
+
+```bash
+curl http://localhost:3000/api/tasks/task-id \
+  -H "x-api-key: your-api-key"
+```
+
+也可以使用 `Authorization: Bearer your-api-key` 传入 API key。请求体只接受 `user`、`type`、`limit`、`username`，其中 `type` 为 `post` 或 `like`，`limit` 为大于等于 0 的整数。
 
 抖音下载的图片默认为 webp 格式，在 `utils/fileHelper.tsx` 中有一些工具函数可以对图片格式进行转换，默认为无压缩转换，可以根据需要自行修改转换参数。你可以使用 `npm run helper` 来运行这些函数。
 

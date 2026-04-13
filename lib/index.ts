@@ -3,6 +3,21 @@ import { SpiderQueue } from "../type";
 import { getUserVideo, getUserSecId, reptyErrorQueue } from "./api";
 import { downloadVideoQueue } from "./download";
 
+export type DownloadType = "post" | "like";
+
+export interface DownloadTaskInput {
+  user: string;
+  type: DownloadType;
+  limit: number;
+  username?: string;
+}
+
+export interface DownloadTaskResult {
+  downloadDir: string;
+  queueLength: number;
+  hasErr: boolean;
+}
+
 /**
  * 主函数
  * @param user 用户 url
@@ -10,7 +25,7 @@ import { downloadVideoQueue } from "./download";
  * @param limit 数量限制
  * @returns
  */
-const loadQueue = async (user: string, type: string, limit: number) => {
+export const loadQueue = async (user: string, type: DownloadType, limit: number) => {
   console.log(`开始获取 ===> ${type === "like" ? "喜欢" : "发布"}列表`);
 
   const userSecId = await getUserSecId(user);
@@ -114,15 +129,35 @@ const loadQueue = async (user: string, type: string, limit: number) => {
   return spiderQueue;
 };
 
-(async () => {
+export const runDownloadTask = async (
+  { user, type, limit, username }: DownloadTaskInput,
+  fallbackIndex = 0
+): Promise<DownloadTaskResult> => {
+  const downloadDir = username || `${type}_user${fallbackIndex}`;
+  const spiderQueue = await loadQueue(user, type, limit);
+  const hasErr = (await downloadVideoQueue(spiderQueue, downloadDir)) ?? false;
+
+  await reptyErrorQueue(hasErr, downloadDir);
+
+  return {
+    downloadDir,
+    queueLength: spiderQueue.length,
+    hasErr,
+  };
+};
+
+export const runConfiguredDownloads = async () => {
   let index = 0;
   for (const { user, type, limit, username } of config.userList) {
     console.log(`开始处理第 ${index + 1} 个用户下载`);
-    const downloadDir = username || `${type}_user${index}`;
-    const spiderQueue = await loadQueue(user, type, limit);
-    const hasErr = await downloadVideoQueue(spiderQueue, downloadDir);
-
-    await reptyErrorQueue(hasErr ?? false, downloadDir);
+    await runDownloadTask({ user, type: type as DownloadType, limit, username }, index);
     index++;
   }
-})();
+};
+
+if (require.main === module) {
+  runConfiguredDownloads().catch((error) => {
+    console.error("下载任务执行失败", error);
+    process.exitCode = 1;
+  });
+}

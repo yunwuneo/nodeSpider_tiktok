@@ -13,5 +13,13 @@
   "downloadDir": "download/",
   "max_retry": 50,
   "autoRetryDownload": true,
-  "workerNum": 4
+  "workerNum": 4,
+  "api": {
+    "apiKey": "",
+    "port": 3000,
+    "rateLimit": {
+      "windowMs": 60000,
+      "max": 30
+    }
+  }
 }
