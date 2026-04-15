@@ -1,4 +1,4 @@
-import { ensureDir } from "fs-extra";
+import { ensureDir, pathExists, writeJSON } from "fs-extra";
 import { resolve } from "node:path";
 import download from "nodejs-file-downloader";
 import { Worker, isMainThread, parentPort, workerData } from "worker_threads";
@@ -111,6 +111,16 @@ const downloadCore = (url: string, directory: string, fileName: string, id: stri
   });
 };
 
+const saveMetaIfMissing = async (metaPath: string, info: any) => {
+  const exists = await pathExists(metaPath);
+  if (!exists) await writeJSON(metaPath, info, { spaces: 2 });
+  return !exists;
+};
+
+const postRecordMessage = () => {
+  if (!isMainThread && parentPort) parentPort.postMessage({ type: "record", record: true });
+};
+
 /**
  * 下载单个视频
  * @param item 下载项
@@ -120,21 +130,54 @@ export const downloadVideoSingle = async (item: SpiderQueue, dir: string) => {
   if (!Array.isArray(item.url)) {
     const directory = resolve(process.cwd(), downloadDir, filenamify(dir));
     const fileName = `${item.id}-${filenamify(item.desc)}.mp4`;
+    const metaName = `${item.id}-${filenamify(item.desc)}.json`;
+    const videoPath = resolve(directory, fileName);
+    const metaPath = resolve(directory, metaName);
     await ensureDir(directory).catch((error) => console.log("downloadVideoQueue: 下载目录创建失败"));
 
-    let downloadHelper = downloadCore(item.url as string, directory, fileName, item.id, true);
-    await downloadHelper.download();
-  } else {
-    const directory = resolve(process.cwd(), downloadDir, filenamify(dir), `${item.id}-${filenamify(item.desc)}`);
-    await ensureDir(directory).catch(() => console.log("downloadVideoQueue: 下载目录创建失败"));
+    const hasVideo = await pathExists(videoPath);
+    const hasMeta = await pathExists(metaPath);
 
-    for await (const [entriesIndex, urlItem] of (item.url as string[]).entries()) {
-      const extName = "mp4";
-      const fileName = `${item.id}_${entriesIndex}.${extName}`;
+    if (hasVideo && hasMeta) {
+      postRecordMessage();
+      return;
+    }
 
-      let downloadHelper = downloadCore(urlItem, directory, fileName, item.id, entriesIndex === item.url.length - 1);
+    if (!hasVideo) {
+      let downloadHelper = downloadCore(item.url as string, directory, fileName, item.id, true);
       await downloadHelper.download();
     }
+
+    const isMetaCreated = await saveMetaIfMissing(metaPath, item.info);
+    if (hasVideo && isMetaCreated) postRecordMessage();
+  } else {
+    const directory = resolve(process.cwd(), downloadDir, filenamify(dir), `${item.id}-${filenamify(item.desc)}`);
+    const metaPath = resolve(directory, "metadata.json");
+    await ensureDir(directory).catch(() => console.log("downloadVideoQueue: 下载目录创建失败"));
+
+    const missingVideos: { index: number; url: string }[] = [];
+    for await (const [entriesIndex, urlItem] of (item.url as string[]).entries()) {
+      const fileName = `${item.id}_${entriesIndex}.mp4`;
+      const videoPath = resolve(directory, fileName);
+      const hasVideo = await pathExists(videoPath);
+      if (!hasVideo) missingVideos.push({ index: entriesIndex, url: urlItem });
+    }
+    const hasMeta = await pathExists(metaPath);
+
+    if (missingVideos.length === 0 && hasMeta) {
+      postRecordMessage();
+      return;
+    }
+
+    for await (const [i, video] of missingVideos.entries()) {
+      const fileName = `${item.id}_${video.index}.mp4`;
+      const isLastMissingVideo = i === missingVideos.length - 1;
+      let downloadHelper = downloadCore(video.url, directory, fileName, item.id, isLastMissingVideo);
+      await downloadHelper.download();
+    }
+
+    const isMetaCreated = await saveMetaIfMissing(metaPath, item.info);
+    if (missingVideos.length === 0 && isMetaCreated) postRecordMessage();
   }
 }
 
@@ -145,20 +188,36 @@ export const downloadVideoSingle = async (item: SpiderQueue, dir: string) => {
  */
 export const downloadImageSingle = async (item: SpiderQueue, dir: string) => {
   const directory = resolve(process.cwd(), downloadDir, filenamify(dir), `${item.id}-${filenamify(item.desc)}`);
+  const metaPath = resolve(directory, "metadata.json");
   const extNameRegex = /\jpg|jpeg|png|webp/i;
   await ensureDir(directory).catch(() => console.log("downloadVideoQueue: 下载目录创建失败"));
 
+  const missingImages: { index: number; url: string; extName: string }[] = [];
   for await (const [entriesIndex, urlItem] of (item.url as string[]).entries()) {
     const extName = extNameRegex.exec(urlItem)[0];
     const fileName = `${item.id}_${entriesIndex}.${extName}`;
+    const imagePath = resolve(directory, fileName);
+    const hasImage = await pathExists(imagePath);
+    if (!hasImage) missingImages.push({ index: entriesIndex, url: urlItem, extName });
+  }
+  const hasMeta = await pathExists(metaPath);
 
-    let downloadHelper = downloadCore(urlItem, directory, fileName, item.id, entriesIndex === item.url.length - 1);
+  if (missingImages.length === 0 && hasMeta) {
+    postRecordMessage();
+    return;
+  }
+
+  for await (const [i, image] of missingImages.entries()) {
+    const fileName = `${item.id}_${image.index}.${image.extName}`;
+    const isLastMissingImage = i === missingImages.length - 1;
+    let downloadHelper = downloadCore(image.url, directory, fileName, item.id, isLastMissingImage);
     await downloadHelper.download();
   }
+  const isMetaCreated = await saveMetaIfMissing(metaPath, item.info);
+  if (missingImages.length === 0 && isMetaCreated) postRecordMessage();
 };
 
 if (!isMainThread) downloadVideoQueue([], "");
 function fileURLToPath(url: string) {
   throw new Error("Function not implemented.");
 }
-
