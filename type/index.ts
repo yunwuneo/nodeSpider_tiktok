@@ -54,4 +54,21 @@ export interface DownloadRecordMessage {
   record: boolean;
 }
 
-export type DownloadCoreMessage = DownloadProgressMessage | DownloadDoneMessage | DownloadRecordMessage;
+export interface DownloadLogMessage {
+  type: "log";
+  level: "info" | "error";
+  message: string;
+}
+
+export interface DownloadStatusMessage {
+  type: "status";
+  status: "start" | "success" | "failed";
+  id: string;
+}
+
+export type DownloadCoreMessage =
+  | DownloadProgressMessage
+  | DownloadDoneMessage
+  | DownloadRecordMessage
+  | DownloadLogMessage
+  | DownloadStatusMessage;

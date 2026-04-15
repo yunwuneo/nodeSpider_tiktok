@@ -2,6 +2,7 @@ import { ensureDir, pathExists, writeJSON } from "fs-extra";
 import { resolve } from "node:path";
 import download from "nodejs-file-downloader";
 import { Worker, isMainThread, parentPort, workerData } from "worker_threads";
+import { EOL } from "node:os";
 import { downloadDir, workerNum } from "../config/config.json";
 import { DownloadCoreMessage, SpiderQueue } from "../type";
 import { errQueueToJson, getDateTimeString, getFileSize, logError } from "../utils";
@@ -24,12 +25,23 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
         forceRedraw: true,
         barsize: 60,
         autopadding: true,
-        format: "下载 {id}: {bar} {percentage}% | Size: {totalSize}MB | ETA: {eta}s",
+        clearOnComplete: false,
+        format:
+          "整体进度: {bar} {percentage}% | {complete}/{total} | 成功:{success} 失败:{failed} 进行中:{running}",
       },
       cliProgress.Presets.shades_grey
     );
     let downloadRecord = 0;
-    const progressDict = {};
+    let failedRecord = 0;
+    let activeRecord = 0;
+    let logCount = 0;
+    const overallProgress = progressBar.create(videoQueue.length, 0, {
+      complete: 0,
+      total: videoQueue.length,
+      success: 0,
+      failed: 0,
+      running: 0,
+    });
     const workerData = [];
     const len = Math.ceil(videoQueue.length / workerNum);
     for (let i = 0; i < workerNum; i++) workerData.push(videoQueue.slice(i * len, (i + 1) * len));
@@ -40,11 +52,42 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
         new Promise((resolve, reject) => {
           worker.on("message", (msg: DownloadCoreMessage) => {
             if (msg.type === "progress") {
-              const { id, percentage, totalSize } = msg.message;
-              if (!progressDict[id]) progressDict[id] = progressBar.create(100, 0);
-              progressDict[id].update(Number(percentage), { id, totalSize });
-            } else if (msg.type === "record" && msg.record) downloadRecord++;
-            else if (msg.type === "done") resolve(msg.hasErr);
+              return;
+            } else if (msg.type === "record" && msg.record) {
+              downloadRecord++;
+              overallProgress.update(downloadRecord + failedRecord, {
+                complete: downloadRecord + failedRecord,
+                total: videoQueue.length,
+                success: downloadRecord,
+                failed: failedRecord,
+                running: activeRecord,
+              });
+            } else if (msg.type === "status") {
+              if (msg.status === "start") activeRecord++;
+              if (msg.status === "success") activeRecord = Math.max(activeRecord - 1, 0);
+              if (msg.status === "failed") {
+                activeRecord = Math.max(activeRecord - 1, 0);
+                failedRecord++;
+                overallProgress.update(downloadRecord + failedRecord, {
+                  complete: downloadRecord + failedRecord,
+                  total: videoQueue.length,
+                  success: downloadRecord,
+                  failed: failedRecord,
+                  running: activeRecord,
+                });
+              }
+
+              overallProgress.update(downloadRecord + failedRecord, {
+                complete: downloadRecord + failedRecord,
+                total: videoQueue.length,
+                success: downloadRecord,
+                failed: failedRecord,
+                running: activeRecord,
+              });
+            } else if (msg.type === "log") {
+              logCount++;
+              progressBar.log(`[${logCount}] ${msg.level.toUpperCase()} ${msg.message}${EOL}`);
+            } else if (msg.type === "done") resolve(msg.hasErr);
           });
           worker.on("error", reject);
           worker.on("exit", (code) => {
@@ -56,7 +99,14 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
     const results = await Promise.allSettled(promises);
 
     progressBar.stop();
-    console.log("下载完成 任务结束 实际下载文件总数 ===>", downloadRecord, "/", videoQueue.length);
+    console.log(
+      "下载完成 任务结束 ===> 成功:",
+      downloadRecord,
+      "失败:",
+      failedRecord,
+      "总数:",
+      videoQueue.length
+    );
     return results.every((result) => result.status === "fulfilled" && result.value);
   } else {
     let hasErr = false;
@@ -64,14 +114,33 @@ export const downloadVideoQueue = async (videoQueue: SpiderQueue[], dir: string)
       try {
         // if (Array.isArray(item.url)) await downloadImageSingle(item, workerData.dir);
         // else await downloadVideoSingle(item, workerData.dir);
+        parentPort.postMessage({ type: "status", status: "start", id: item.id });
+        parentPort.postMessage({
+          type: "log",
+          level: "info",
+          message: `开始下载 ${item.isImage ? "图集" : "视频"} ${item.id}（队列序号 ${index + 1}）`,
+        });
+
         if (item.isImage) await downloadImageSingle(item, workerData.dir);
         else await downloadVideoSingle(item, workerData.dir);
+
+        parentPort.postMessage({ type: "status", status: "success", id: item.id });
+        parentPort.postMessage({
+          type: "log",
+          level: "info",
+          message: `下载完成 ${item.id}`,
+        });
       } catch (error) {
         hasErr = true;
         const errLogPath = resolve(process.cwd(), downloadDir, "logs");
         await logError(error, resolve(errLogPath, `${getDateTimeString()}.log`));
         await errQueueToJson(JSON.stringify(item.info), resolve(errLogPath, "errorQueue.json"));
-        console.log("下载失败 ===>", item.id, "日志已保存");
+        parentPort.postMessage({ type: "status", status: "failed", id: item.id });
+        parentPort.postMessage({
+          type: "log",
+          level: "error",
+          message: `下载失败 ${item.id}，错误日志已保存`,
+        });
         continue;
       }
     }
